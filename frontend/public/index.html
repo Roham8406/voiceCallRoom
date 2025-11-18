@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Voice Chat App</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 20px; }
+    #participants { margin-top: 10px; }
+    .participant { display:flex; gap:8px; align-items:center; margin:6px 0; }
+    audio { display:block; }
+  </style>
+</head>
+<body>
+  <h2>Voice Chat App (demo)</h2>
+  <div>
+    <label>Room ID: <input id="roomId" value="room1"/></label>
+    <label>User ID: <input id="userId" value="user"+Math.floor(Math.random()*1000) /></label>
+    <button id="joinBtn">Join</button>
+    <button id="leaveBtn" disabled>Leave</button>
+  </div>
+
+  <div id="localStatus"></div>
+
+  <h3>Participants</h3>
+  <div id="participants"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
