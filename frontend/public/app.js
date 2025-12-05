@@ -1,197 +1,234 @@
-// Simple frontend using WebSocket for signaling and WebRTC for audio
-importScripts?; // noop for editors
-
-const backendWs = () => {
-    const loc = window.location;
-    // adjust if backend runs on different host
-    const wsProtocol = (loc.protocol === 'https:') ? 'wss' : 'ws';
-    const port = 8080;
-    return wsProtocol + '://' + loc.hostname + ':' + port + '/ws';
-};
+/*
+Minimal WebRTC client compatible with the raw Java WebSocket server.
+Encodes SDP and ICE candidates as base64 so they survive the server’s simple parser.
+*/
 
 let ws;
 let localStream;
-let peers = {}; // userId -> RTCPeerConnection
-let audioElements = {}; // userId -> audio element
-let myUserId, myRoomId;
+let pcs = {};            // remoteId -> RTCPeerConnection
+let audioEls = {};       // remoteId -> HTMLAudioElement
+let myUserId = '';
+let myRoomId = '';
 
-document.getElementById('joinBtn').addEventListener('click', async () => {
-    myRoomId = document.getElementById('roomId').value.trim();
-    myUserId = document.getElementById('userId').value.trim() || ('user' + Math.floor(Math.random()*1000));
-    if (!myRoomId) return alert('enter a room id');
-    await startLocalStream();
-    connectWebSocket();
-    document.getElementById('joinBtn').disabled = true;
-    document.getElementById('leaveBtn').disabled = false;
-});
+const hostEl = document.getElementById('host');
+const portEl = document.getElementById('port');
 
-document.getElementById('leaveBtn').addEventListener('click', () => {
-    sendMessage({type:'leave', roomId: myRoomId, from: myUserId});
-    for (const uid of Object.keys(peers)) {
-        closePeer(uid);
-    }
-    if (ws) ws.close();
-    if (localStream) {
-        localStream.getTracks().forEach(t=>t.stop());
-        localStream = null;
-    }
-    document.getElementById('participants').innerHTML = '';
-    document.getElementById('joinBtn').disabled = false;
-    document.getElementById('leaveBtn').disabled = true;
-});
+document.getElementById('joinBtn').onclick = async () => {
+  myRoomId = document.getElementById('roomId').value.trim();
+  myUserId = document.getElementById('userId').value.trim() || ('user'+Math.floor(Math.random()*1000));
 
-async function startLocalStream(){
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({audio:true});
-        document.getElementById('localStatus').innerText = 'Local mic active';
-    } catch(e){
-        alert('Could not access microphone: ' + e.message);
-    }
+  if (!myRoomId) {
+    alert('Enter a room ID');
+    return;
+  }
+
+  // Start microphone
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    setStatus('Microphone OK');
+  } catch (e) {
+    alert('Microphone error: ' + e.message);
+    return;
+  }
+
+  connectWs();
+  document.getElementById('joinBtn').disabled = true;
+  document.getElementById('leaveBtn').disabled = false;
+};
+
+document.getElementById('leaveBtn').onclick = () => {
+  send({ type:'leave', roomId: myRoomId, from: myUserId });
+
+  for (const id in pcs) {
+    try { pcs[id].close(); } catch(e){}
+    removeParticipantUI(id);
+    delete pcs[id];
+  }
+
+  if (ws) ws.close();
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+
+  document.getElementById('joinBtn').disabled = false;
+  document.getElementById('leaveBtn').disabled = true;
+  setStatus('Left room');
+};
+
+function wsUrl() {
+  const host = hostEl.value || 'localhost';
+  const port = portEl.value || '8080';
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${host}:${port}/ws`;
 }
 
-function connectWebSocket(){
-    ws = new WebSocket(backendWs());
-    ws.onopen = () => {
-        sendMessage({type:'join', roomId: myRoomId, from: myUserId});
-    };
-    ws.onmessage = async (evt) => {
-        const msg = JSON.parse(evt.data);
-        const type = msg.type;
-        if (type === 'participant-joined' || type === 'participant-left') {
-            renderParticipants(msg.participants || []);
-            return;
-        }
-        if (type === 'offer') {
-            const from = msg.from;
-            await handleOffer(from, msg.payload);
-            return;
-        }
-        if (type === 'answer') {
-            const from = msg.from;
-            const pc = peers[from];
-            if (pc) {
-                await pc.setRemoteDescription(msg.payload);
-            }
-            return;
-        }
-        if (type === 'ice') {
-            const from = msg.from;
-            const pc = peers[from];
-            if (pc && msg.payload) {
-                try { await pc.addIceCandidate(msg.payload); } catch(e){}
-            }
-        }
-    };
-    ws.onclose = ()=> console.log('ws closed');
-}
+function connectWs() {
+  ws = new WebSocket(wsUrl());
 
-function sendMessage(obj){
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify(obj));
-}
+  ws.onopen = () => {
+    setStatus('Connected to signaling server');
+    send({ type:'join', roomId: myRoomId, from: myUserId });
+  };
 
-function renderParticipants(list){
-    const container = document.getElementById('participants');
-    container.innerHTML = '';
-    for (const id of list) {
-        if (id === myUserId) continue;
-        const div = document.createElement('div');
-        div.className = 'participant';
-        div.id = 'p_' + id;
-        const label = document.createElement('span');
-        label.innerText = id;
-        const muteBtn = document.createElement('button');
-        muteBtn.innerText = 'Mute';
-        muteBtn.onclick = ()=> toggleMute(id, muteBtn);
-        div.appendChild(label);
-        div.appendChild(muteBtn);
-        const audio = document.createElement('audio');
-        audio.id = 'audio_' + id;
-        audio.autoplay = true;
-        audio.controls = false;
-        div.appendChild(audio);
-        container.appendChild(div);
+  ws.onmessage = async (evt) => {
+    let msg;
+    try { msg = JSON.parse(evt.data); }
+    catch { return console.warn('Bad message:', evt.data); }
 
-        // create peer connection to that user if not exists
-        if (!peers[id]) {
-            createPeerAsCaller(id);
-        }
-    }
-}
+    const type = msg.type;
 
-function toggleMute(userId, btn){
-    const audio = document.getElementById('audio_' + userId);
-    if (!audio) return;
-    audio.muted = !audio.muted;
-    btn.innerText = audio.muted ? 'Unmute' : 'Mute';
-}
-
-function createPeerAsCaller(remoteId){
-    const pc = new RTCPeerConnection({
-        iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
-    });
-    peers[remoteId] = pc;
-
-    // add local tracks
-    if (localStream) {
-        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+    if (type === 'participant-joined' || type === 'user-joined') {
+      const other = msg.user || msg.from;
+      if (!other || other === myUserId) return;
+      addParticipantUI(other);
+      await createOfferFor(other);
+      return;
     }
 
-    pc.onicecandidate = (e) => {
-        if (e.candidate) {
-            sendMessage({type:'ice', roomId: myRoomId, from: myUserId, to: remoteId, payload: e.candidate});
-        }
-    };
+    if (type === 'offer' && msg.to === myUserId) {
+      await handleRemoteOffer(msg.from, atob(msg.sdp));
+      return;
+    }
 
-    pc.ontrack = (e) => {
-        const el = document.getElementById('audio_' + remoteId);
-        if (el) {
-            el.srcObject = e.streams[0];
-        }
-    };
+    if (type === 'answer' && msg.to === myUserId) {
+      const pc = pcs[msg.from];
+      if (pc) await pc.setRemoteDescription({ type:'answer', sdp: atob(msg.sdp) });
+      return;
+    }
 
-    // create offer
-    pc.createOffer().then(offer => pc.setLocalDescription(offer).then(()=> {
-        sendMessage({type:'offer', roomId: myRoomId, from: myUserId, to: remoteId, payload: pc.localDescription});
-    }));
+    if (type === 'ice' && msg.to === myUserId) {
+      try {
+        const candObj = JSON.parse(atob(msg.candidate));
+        const pc = pcs[msg.from];
+        if (pc) await pc.addIceCandidate(candObj);
+      } catch(e) {
+        console.warn('ICE decode failed', e);
+      }
+      return;
+    }
+  };
+
+  ws.onclose = () => setStatus('WS disconnected');
+  ws.onerror = () => setStatus('WS error');
 }
 
-async function handleOffer(remoteId, desc){
-    // create peer if not exists
-    if (!peers[remoteId]) {
-        const pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-        peers[remoteId] = pc;
-
-        pc.onicecandidate = (e) => {
-            if (e.candidate) {
-                sendMessage({type:'ice', roomId: myRoomId, from: myUserId, to: remoteId, payload: e.candidate});
-            }
-        };
-
-        pc.ontrack = (e) => {
-            const el = document.getElementById('audio_' + remoteId);
-            if (el) {
-                el.srcObject = e.streams[0];
-            }
-        };
-
-        if (localStream) {
-            for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
-        }
-    }
-    const pc = peers[remoteId];
-    await pc.setRemoteDescription(desc);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    sendMessage({type:'answer', roomId: myRoomId, from: myUserId, to: remoteId, payload: pc.localDescription});
+function send(o) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(o));
 }
 
-function closePeer(remoteId){
-    const pc = peers[remoteId];
-    if (pc) {
-        try { pc.close(); } catch(e){}
-        delete peers[remoteId];
+/* UI helpers */
+function setStatus(s) {
+  document.getElementById('status').innerText = s;
+}
+
+function addParticipantUI(id) {
+  if (document.getElementById('p_' + id)) return;
+
+  const div = document.createElement('div');
+  div.className = 'participant';
+  div.id = 'p_' + id;
+
+  const label = document.createElement('span');
+  label.innerText = id;
+
+  const muteBtn = document.createElement('button');
+  muteBtn.innerText = 'Mute';
+
+  muteBtn.onclick = () => {
+    const a = audioEls[id];
+    if (!a) return;
+    a.muted = !a.muted;
+    muteBtn.innerText = a.muted ? 'Unmute' : 'Mute';
+  };
+
+  const audio = document.createElement('audio');
+  audio.id = 'audio_' + id;
+  audio.autoplay = true;
+
+  div.append(label, muteBtn, audio);
+  document.getElementById('participants').appendChild(div);
+
+  audioEls[id] = audio;
+}
+
+function removeParticipantUI(id) {
+  const el = document.getElementById('p_' + id);
+  if (el) el.remove();
+  delete audioEls[id];
+}
+
+/* WebRTC */
+function getOrCreatePc(remoteId) {
+  if (pcs[remoteId]) return pcs[remoteId];
+
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+
+  if (localStream) {
+    for (const t of localStream.getTracks())
+      pc.addTrack(t, localStream);
+  }
+
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      send({
+        type: 'ice',
+        roomId: myRoomId,
+        from: myUserId,
+        to: remoteId,
+        candidate: btoa(JSON.stringify(e.candidate))
+      });
     }
-    const el = document.getElementById('p_' + remoteId);
-    if (el) el.remove();
+  };
+
+  pc.ontrack = (e) => {
+    addParticipantUI(remoteId);
+    audioEls[remoteId].srcObject = e.streams[0];
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      removeParticipantUI(remoteId);
+      delete pcs[remoteId];
+    }
+  };
+
+  pcs[remoteId] = pc;
+  return pc;
+}
+
+async function createOfferFor(remoteId) {
+  addParticipantUI(remoteId);
+  const pc = getOrCreatePc(remoteId);
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  send({
+    type: 'offer',
+    roomId: myRoomId,
+    from: myUserId,
+    to: remoteId,
+    sdp: btoa(offer.sdp)
+  });
+}
+
+async function handleRemoteOffer(fromId, sdp) {
+  addParticipantUI(fromId);
+  const pc = getOrCreatePc(fromId);
+
+  await pc.setRemoteDescription({ type:'offer', sdp });
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  send({
+    type: 'answer',
+    roomId: myRoomId,
+    from: myUserId,
+    to: fromId,
+    sdp: btoa(answer.sdp)
+  });
 }
