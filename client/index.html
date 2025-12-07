@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Chat</title>
+    <title>Voice Chat</title>
     <style>
         body { font-family: Arial; margin: 20px; }
         #messages { height: 300px; overflow-y: scroll; border: 1px solid #aaa; padding: 10px; }
@@ -10,38 +10,87 @@
 </head>
 <body>
 
-<h2>Game Chat</h2>
-
+<h2>LAN Voice Chat</h2>
 <div id="messages"></div>
-
 <input id="msg" placeholder="Type message..." style="width:80%">
 <button onclick="sendMsg()">Send</button>
+<button onclick="startAudio()">Start Audio</button>
 
 <script>
-    const ws = new WebSocket("ws://172.27.128.250:8080");
+    let ws;
+    let audioCtx;
+    let workletNode;
 
-    ws.onopen = () => addMsg("✔ Connected to server");
+    // Start WebSocket connection
+    function startWS() {
+        ws = new WebSocket("wss://172.27.128.250:8080");
+        ws.binaryType = "arraybuffer";
 
-    ws.onmessage = (e) => {
-        addMsg("📨 " + e.data);
-    };
+        ws.onopen = () => console.log("Connected to server");
+        ws.onmessage = (event) => {
+            if (!(event.data instanceof ArrayBuffer)) return;
+            playRawPCM(event.data);
+            // console.log("Received audio chunk, bytes:", event.data.byteLength);
+        };
+    }
 
+    // Convert raw PCM to Float32 and play
+    function playRawPCM(arrayBuffer) {
+        const float32Array = new Float32Array(arrayBuffer.byteLength / 2);
+        const view = new DataView(arrayBuffer);
+        for (let i = 0; i < float32Array.length; i++) {
+            float32Array[i] = view.getInt16(i*2, true) / 0x7fff;
+        }
+
+        const buffer = audioCtx.createBuffer(1, float32Array.length, 44100);
+        buffer.getChannelData(0).set(float32Array);
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start();
+    }
+
+    // Start microphone capture
+    async function startAudio() {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            alert("Browser does not support microphone");
+            return;
+        }
+
+        audioCtx = new AudioContext({ sampleRate: 44100 });
+
+        // Resume AudioContext on user interaction
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = audioCtx.createMediaStreamSource(stream);
+
+        // Load AudioWorklet processor
+        await audioCtx.audioWorklet.addModule('pcm-processor.js');
+        workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor');
+
+        // Send PCM chunks to server
+        workletNode.port.onmessage = (e) => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(e.data);
+                // console.log("Sent PCM chunk, bytes:", e.data.byteLength);
+            }
+        };
+
+        source.connect(workletNode).connect(audioCtx.destination);
+    }
+
+    // Simple text chat function
     function sendMsg() {
-        const text = document.getElementById("msg").value;
-        if (!text) return;
-
-        ws.send(text);
-        addMsg("You: " + text);
-        document.getElementById("msg").value = "";
+        const input = document.getElementById('msg');
+        if (ws && ws.readyState === WebSocket.OPEN && input.value.trim() !== "") {
+            ws.send(JSON.stringify({ text: input.value }));
+            input.value = '';
+        }
     }
 
-    function addMsg(text) {
-        const div = document.getElementById("messages");
-        const el = document.createElement("div");
-        el.textContent = text;
-        div.appendChild(el);
-        div.scrollTop = div.scrollHeight;
-    }
+    // Start WebSocket immediately
+    startWS();
 </script>
 
 </body>

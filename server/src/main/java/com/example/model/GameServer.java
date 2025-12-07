@@ -18,11 +18,11 @@ public class GameServer {
         this.roomId = roomId;
     }
 
-    public void sendAll(String message, ClientHandler excluded) {
+    public void sendAll(byte[] data, ClientHandler excluded) {
         clients.forEach(client -> {
             if (client.getValue() != excluded) {
                 try {
-                    client.getValue().send(message);
+                    client.getValue().send(data);
                 } catch (Exception ignored) {
                 }
             }

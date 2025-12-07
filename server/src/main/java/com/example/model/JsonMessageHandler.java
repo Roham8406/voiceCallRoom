@@ -12,19 +12,18 @@ public class JsonMessageHandler {
         this.output = new DataOutputStream(output);
     }
 
-    public void send(String json) throws IOException {
-        byte[] data = json.getBytes(StandardCharsets.UTF_8);
-
+    public void send(byte[] data) throws IOException {
         output.writeInt(data.length);
         output.write(data);
         output.flush();
     }
 
-    public String receive() throws IOException {
+
+    public byte[] receive() throws IOException {
         int length = input.readInt();
         byte[] data = new byte[length];
         input.readFully(data);
 
-        return new String(data, StandardCharsets.UTF_8);
+        return data;
     }
 }

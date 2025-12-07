@@ -30,11 +30,12 @@ public class ClientHandler extends Thread {
     @Override
     public void run() {
         try {
-            String message;
+            byte[] message;
             while (running && (message = jsonMessageHandler.get().receive()) != null) {
                 try {
                     gameServer.sendAll(message, this);
-                    System.out.println(message);
+//                    System.out.println(1);
+//                    System.out.println(message);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -53,9 +54,9 @@ public class ClientHandler extends Thread {
     }
 
 
-    public void send(String message) throws IOException {
+    public void send(byte[] data) throws IOException {
         synchronized(jsonMessageHandler) {
-            jsonMessageHandler.get().send(message);
+            jsonMessageHandler.get().send(data);
         }
     }
 }
