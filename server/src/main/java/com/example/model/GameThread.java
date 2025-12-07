@@ -19,7 +19,9 @@ public class GameThread extends Thread {
     private final Map<String, ClientHandler> connections = Collections.synchronizedMap(new HashMap<>());
     private final Map<String, List<String>> users = new HashMap<>();
 
-    private GameThread() {}
+    private GameThread() {
+        games.put(100, new GameServer(100));
+    }
 
     public static GameThread getInstance() {
         if (instance == null) {
@@ -38,23 +40,12 @@ public class GameThread extends Thread {
             while (true) {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("Client connected: " + clientSocket.getInetAddress());
-                ClientHandler clientThread = new ClientHandler(clientSocket);
+                ClientHandler clientThread = new ClientHandler(clientSocket, games.get(100));
+                games.get(100).getClients().add(new Entry<>(new ServerPlayer("101"), clientThread));
                 clientThread.start();
             }
         } catch (IOException e) {
             e.printStackTrace();
-        }
-    }
-
-
-    public void sendAll(String message) {
-        synchronized (connections) {
-            for (Map.Entry<String, ClientHandler> stringClientHandlerEntry : connections.entrySet()) {
-                try {
-                    stringClientHandlerEntry.getValue().send(message);
-                } catch (IOException ignored) {
-                }
-            }
         }
     }
 }

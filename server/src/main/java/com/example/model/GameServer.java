@@ -14,11 +14,17 @@ public class GameServer {
     private transient final ArrayList<Entry<ServerPlayer, ClientHandler>> clients = new ArrayList<>();
     private int roomId;
 
-    public void sendAll(String message) {
+    public GameServer(int roomId) {
+        this.roomId = roomId;
+    }
+
+    public void sendAll(String message, ClientHandler excluded) {
         clients.forEach(client -> {
-            try {
-                client.getValue().send(message);
-            } catch (Exception ignored) {
+            if (client.getValue() != excluded) {
+                try {
+                    client.getValue().send(message);
+                } catch (Exception ignored) {
+                }
             }
         });
     }

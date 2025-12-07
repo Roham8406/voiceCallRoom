@@ -1,21 +1,48 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <meta charset="UTF-8">
+    <title>Chat</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        #messages { height: 300px; overflow-y: scroll; border: 1px solid #aaa; padding: 10px; }
+    </style>
+</head>
 <body>
-<h2>WSS Client</h2>
-<button onclick="sendBytes()">Send</button>
+
+<h2>Game Chat</h2>
+
+<div id="messages"></div>
+
+<input id="msg" placeholder="Type message..." style="width:80%">
+<button onclick="sendMsg()">Send</button>
 
 <script>
-const socket = new WebSocket("wss://localhost:8443");
-socket.binaryType = "arraybuffer";
+    const ws = new WebSocket("ws://172.27.128.250:8080");
 
-socket.onopen = ()=> console.log("Connected");
-socket.onmessage = e => console.log("Received:", new Uint8Array(e.data));
+    ws.onopen = () => addMsg("✔ Connected to server");
 
-function sendBytes(){
-    const b = new Uint8Array([1,2,3,4]);
-    socket.send(b);
-    console.log("Sent:", b);
-}
+    ws.onmessage = (e) => {
+        addMsg("📨 " + e.data);
+    };
+
+    function sendMsg() {
+        const text = document.getElementById("msg").value;
+        if (!text) return;
+
+        ws.send(text);
+        addMsg("You: " + text);
+        document.getElementById("msg").value = "";
+    }
+
+    function addMsg(text) {
+        const div = document.getElementById("messages");
+        const el = document.createElement("div");
+        el.textContent = text;
+        div.appendChild(el);
+        div.scrollTop = div.scrollHeight;
+    }
 </script>
+
 </body>
 </html>

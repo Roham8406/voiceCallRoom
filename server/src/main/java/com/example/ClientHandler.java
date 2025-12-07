@@ -18,7 +18,8 @@ public class ClientHandler extends Thread {
     private GameServer gameServer;
     private boolean running = true;
 
-    public ClientHandler(Socket socket) {
+    public ClientHandler(Socket socket, GameServer gameServer) {
+        this.gameServer = gameServer;
         this.clientSocket = socket;
         try {
             this.jsonMessageHandler.set(new JsonMessageHandler(clientSocket.getInputStream(), clientSocket.getOutputStream()));
@@ -32,7 +33,8 @@ public class ClientHandler extends Thread {
             String message;
             while (running && (message = jsonMessageHandler.get().receive()) != null) {
                 try {
-                    gameServer.sendAll(message);
+                    gameServer.sendAll(message, this);
+                    System.out.println(message);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
