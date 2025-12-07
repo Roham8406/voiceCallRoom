@@ -5,15 +5,11 @@
     <title>Voice Chat</title>
     <style>
         body { font-family: Arial; margin: 20px; }
-        #messages { height: 300px; overflow-y: scroll; border: 1px solid #aaa; padding: 10px; }
     </style>
 </head>
 <body>
 
 <h2>LAN Voice Chat</h2>
-<div id="messages"></div>
-<input id="msg" placeholder="Type message..." style="width:80%">
-<button onclick="sendMsg()">Send</button>
 <button onclick="startAudio()">Start Audio</button>
 
 <script>
@@ -21,16 +17,19 @@
     let audioCtx;
     let workletNode;
 
+    // Temporary buffer to accumulate PCM chunks for smoother audio
+    let pcmBuffer = [];
+
     // Start WebSocket connection
     function startWS() {
         ws = new WebSocket("wss://172.27.128.250:8080");
         ws.binaryType = "arraybuffer";
 
         ws.onopen = () => console.log("Connected to server");
+
         ws.onmessage = (event) => {
             if (!(event.data instanceof ArrayBuffer)) return;
             playRawPCM(event.data);
-            // console.log("Received audio chunk, bytes:", event.data.byteLength);
         };
     }
 
@@ -42,8 +41,9 @@
             float32Array[i] = view.getInt16(i*2, true) / 0x7fff;
         }
 
-        const buffer = audioCtx.createBuffer(1, float32Array.length, 44100);
+        const buffer = audioCtx.createBuffer(1, float32Array.length, audioCtx.sampleRate);
         buffer.getChannelData(0).set(float32Array);
+
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
         source.connect(audioCtx.destination);
@@ -57,9 +57,7 @@
             return;
         }
 
-        audioCtx = new AudioContext({ sampleRate: 44100 });
-
-        // Resume AudioContext on user interaction
+        audioCtx = new AudioContext();
         if (audioCtx.state === 'suspended') await audioCtx.resume();
 
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -69,27 +67,25 @@
         await audioCtx.audioWorklet.addModule('pcm-processor.js');
         workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor');
 
-        // Send PCM chunks to server
+        // Send PCM chunks to server (buffered)
         workletNode.port.onmessage = (e) => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(e.data);
-                // console.log("Sent PCM chunk, bytes:", e.data.byteLength);
+            pcmBuffer.push(new Uint8Array(e.data));
+            // Send when buffer reaches ~4096 samples
+            const totalBytes = pcmBuffer.reduce((sum, c) => sum + c.length, 0);
+            if (totalBytes >= 4096*2) {
+                const combined = new Uint8Array(totalBytes);
+                let offset = 0;
+                for (const chunk of pcmBuffer) {
+                    combined.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                if (ws.readyState === WebSocket.OPEN) ws.send(combined.buffer);
+                pcmBuffer = [];
             }
         };
 
         source.connect(workletNode).connect(audioCtx.destination);
     }
-
-    // Simple text chat function
-    function sendMsg() {
-        const input = document.getElementById('msg');
-        if (ws && ws.readyState === WebSocket.OPEN && input.value.trim() !== "") {
-            ws.send(JSON.stringify({ text: input.value }));
-            input.value = '';
-        }
-    }
-
-    // Start WebSocket immediately
     startWS();
 </script>
 
