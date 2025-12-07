@@ -33,6 +33,8 @@ public class ClientHandler extends Thread {
             while (running && (message = jsonMessageHandler.get().receive()) != null) {
                 try {
                     gameServer.sendAll(message);
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
         } catch (EOFException eofException) {

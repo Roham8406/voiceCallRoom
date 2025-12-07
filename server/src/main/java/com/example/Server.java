@@ -1,6 +1,7 @@
 package com.example;
 
-import io.github.some_example_name.server.model.GameThread;
+
+import com.example.model.GameThread;
 
 public class Server {
 
