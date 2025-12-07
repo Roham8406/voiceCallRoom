@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h2>WSS Client</h2>
+<button onclick="sendBytes()">Send</button>
+
+<script>
+const socket = new WebSocket("wss://localhost:8443");
+socket.binaryType = "arraybuffer";
+
+socket.onopen = ()=> console.log("Connected");
+socket.onmessage = e => console.log("Received:", new Uint8Array(e.data));
+
+function sendBytes(){
+    const b = new Uint8Array([1,2,3,4]);
+    socket.send(b);
+    console.log("Sent:", b);
+}
+</script>
+</body>
+</html>
