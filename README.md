@@ -1,17 +1,13 @@
-# Voice Chat App (Demo)
+# WSS WebSocket Server + HTML Client
 
-This repository contains a minimal demo of a voice chat application:
-- Java Spring Boot backend (WebSocket signaling)
-- JavaScript frontend (WebRTC + WebSocket)
-- Local mute implemented by muting audio elements on the client
+## Generate keystore:
+keytool -genkeypair -alias ws -keyalg RSA -keystore keystore.jks -storepass password -validity 3650
 
-How to run (requires Docker and Docker Compose):
+Place keystore.jks in server/ directory.
 
-    docker-compose up --build
+## Run server:
+mvn clean package
+mvn exec:java -Dexec.mainClass="com.example.Server"
 
-- Backend signaling server on http://localhost:8080 (WebSocket at ws://localhost:8080/ws)
-- Frontend static server on http://localhost:3000
-
-Notes:
-- This is a demo starter project. The signaling server keeps all state in-memory.
-- For production: add authentication, TLS (wss), TURN server, and persistence.
+## Open client:
+Open client/index.html in a browser (allow insecure localhost test).
